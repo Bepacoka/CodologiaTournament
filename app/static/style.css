@@ -1,0 +1,435 @@
+/* style.css — финальная версия для tournament/task layout */
+
+/* базовые */
+body {
+    background-image: url("background.png");
+    margin: 0;
+    padding: 0;
+    font-family: "Open Sans", sans-serif;
+    color: #222;
+    height: 100%;
+}
+
+footer {
+    position: absolute;
+    margin: 0;
+    bottom: 0;
+    height: 100px;
+}
+ 
+/* удобное box-sizing */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* общий контейнер страницы */
+.main {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 30px;
+    background-color: white;
+    left: 12.5vw;
+    top: 5vh;
+    width: 75vw;
+    height: 80vh;
+    border-radius: 15px;
+    box-shadow: 0 0 40px 10px #00000044;
+    padding: 25px;
+    overflow: visible; /* изменено с hidden на visible, чтобы сообщения были видны */
+}
+
+/* кнопки задач в навигации */
+.task-button {
+    width: 50px;
+    height: 50px;
+    border-radius: 12px;
+    background-color: #ddd;
+    text-align: center;
+    line-height: 50px;
+    font-size: 22px;
+    text-decoration: none;
+    color: black;
+    font-weight: bold;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+}
+.task-button:hover { background-color: #bbb; }
+.task-right { background-color: #77C234; color: white; }
+.task-wrong { background-color: #E22550; color: white; }
+.task-partial { background-color: #F1CC00; color: white; }
+.task-active {
+  background-color: #523488 !important;
+  color: white !important;
+  border: 2px solid #fff;
+  box-shadow: 0 0 8px rgba(82, 52, 136, 0.5);
+}
+
+/* контейнер турнира */
+.tournament-root {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
+  height: 100%;
+}
+
+/* строка с колонками */
+.tournament-row {
+  display: flex;
+  gap: 20px;
+  align-items: stretch;
+  flex: 1 1 auto;
+  width: 100%;
+}
+
+/* колонка задачи */
+.task {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    flex: 1 1 auto;
+    min-width: 0;
+    padding-right: 8px;
+}
+
+/* содержимое задачи — занимает оставшееся пространство сверху и скроллится */
+.task-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 8px;
+}
+
+/* форма/кнопка ответа — всегда внизу */
+.task-answer {
+    flex: 0 0 auto;
+    margin-top: 12px;
+}
+
+/* инпуты и кнопки */
+.task-input {
+    overflow-y: hidden;
+    box-sizing: border-box;
+    white-space: nowrap;
+    background-color: #9CE2DA;
+    border: none;
+    border-radius: 8px;
+    height: 46px;
+    line-height: 46px;
+    padding-left: 12px;
+    font-size: 18px;
+    margin-bottom: 6px;
+}
+.task-send {
+    width: 100%;
+    border: none;
+    border-radius: 8px;
+    height: 46px;
+    color: white;
+    font-size: 18px;
+}
+
+/* цветовые классы */
+.no-answer { background-color: #523488; }
+.answer-right { background-color: #77C234; }
+.answer-wrong { background-color: #E22550; }
+.answer-partial { background-color: #F1CC00; }
+
+.task-title { color: #E22550; margin: 0; }
+.task-text { font-size: 18px; margin: 0; white-space: pre-wrap; }
+.task-image { max-width: 100%; display: block; margin: 12px auto; }
+
+/* контейнер для правой колонки с задачами и картинкой блока */
+.tasks-container {
+    position: relative;
+    flex: 0 0 320px;
+    max-width: 320px;
+    align-self: stretch;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+/* правая колонка — список задач (не растягиваем по высоте) */
+.tasks-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 12px;
+    background-color: #F1CC0013;
+    border-radius: 15px;
+    width: 100%;
+    height: auto;
+    flex-shrink: 0;
+    overflow-y: auto;
+    max-height: calc(80vh - 160px);
+}
+.tasks .task-button { margin: 6px; }
+
+@media (max-width: 900px) {
+    .tasks-container { flex: 0 0 220px; max-width: 220px; }
+    .main { left: 5vw; width: 90vw; padding: 16px; }
+    .task-image { width: 100%; }
+}
+
+.hidden { display: none; }
+
+#message {
+    position: relative;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 12px 24px;
+    border-radius: 8px;
+    color: white;
+    font-weight: 600;
+    font-size: 16px;
+    z-index: 1000;
+    transition: opacity .3s ease, transform .3s ease;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    max-width: calc(40% - 50px);
+    text-align: center;
+    pointer-events: none; /* чтобы не блокировать клики */
+}
+#message.hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-50%) translateY(-10px);
+}
+#message.visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(-50%) translateY(0);
+}
+#message.success {
+    background-color: #77C234;
+}
+#message.error {
+    background-color: #E22550;
+}
+#message.info {
+  background-color: #523488;
+}
+
+/* примеры — компактный вертикальный список */
+.examples-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.example-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    line-height: 1.2;
+}
+
+/* текст примера с truncation, короткий input справа */
+.example-text {
+    flex: 0 1 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: calc(100% - 90px);
+}
+
+/* общий инпут для одиночной задачи — занимает всю ширину */
+.task-input {
+    overflow-y: hidden;
+    box-sizing: border-box;
+    white-space: nowrap;
+    background-color: #9CE2DA;
+    border: none;
+    border-radius: 8px;
+    height: 46px;
+    line-height: 46px;
+    padding-left: 12px;
+    font-size: 18px;
+    margin-bottom: 6px;
+    width: 100%;           /* важно: полный размер для одиночных полей */
+}
+
+/* инпуты для примеров — компактные, справа от текста */
+.example-input {
+    width: 72px;
+    height: 32px;
+    padding: 4px 6px;
+    font-size: 0.95rem;
+    border: 0;
+    border-radius: 8px;
+    background-color: #9CE2DA;
+    box-sizing: border-box;
+}
+
+/* строки с примерами */
+.example-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    line-height: 1.2;
+}
+
+/* текст примера — занимает оставшееся место */
+.example-text {
+    flex: 0 1 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: calc(100% - 100px);
+}
+
+/* dashboard styles (append to style.css) */
+
+.dashboard-root {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+/* table */
+.standings {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.standings thead th {
+    text-align: left;
+    padding: 8px;
+    border-bottom: 2px solid #eee;
+    background: #fafafa;
+}
+
+.standings tbody td {
+    padding: 8px;
+    font-size: 18px;
+    border-bottom: 1px solid #f1f1f1;
+    vertical-align: middle;
+}
+
+.standings .rank {
+    width: 10px;
+    font-weight: bold;
+    font-size: 18px;
+    text-align: center;
+}
+
+.standings .total {
+    width: 30px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 24px;
+}
+
+/* cells */
+.standings .cell {
+    width: 30px;
+    text-align: center;
+    border-radius: 6px;
+    font-size: 24px;
+}
+
+/* states */
+.standings .cell.correct {
+    background: linear-gradient(180deg,#e6f9ec,#dff3e3);
+    color: #0b4f18;
+    font-weight: 600;
+    border: 1px solid #bfe6bf;
+}
+
+.standings .cell.wrong {
+    background: linear-gradient(180deg,#ffecec,#ffdede);
+    color: #7b131e;
+    font-weight: 600;
+    border: 1px solid #f0b2b8;
+}
+
+.standings .cell.partial {
+    background: linear-gradient(180deg,#fff8d9,#fff4c2);
+    color: #8b6914;
+    font-weight: 600;
+    border: 1px solid #f5e68f;
+}
+
+.standings .cell.no-answer {
+    background: transparent;
+    color: #999;
+    border: 1px dashed #eee;
+}
+
+/* responsiveness */
+@media (max-width: 900px) {
+    .standings .team { width: 180px; }
+    .standings .rank, .standings .total { width: 60px; font-size: 13px; }
+    .standings .cell { width: 48px; font-size: 13px; }
+}
+
+/* навигация и секции для one-page dashboard */
+.dash-nav { display:flex; gap:8px; align-items:center; }
+.nav-btn {
+    display:inline-block;
+    padding:8px 12px;
+    border-radius:8px;
+    background:#eee;
+    color:#222;
+    text-decoration:none;
+    font-weight:600;
+}
+.nav-btn:hover { background:#ddd; }
+.dash-section { margin: 18px 0; padding: 8px 0; }
+.table-wrap { overflow:auto; margin-top:8px; }
+
+/* Скрытие/показ секций — только одна видна (фикс: учитываем aria-hidden) */
+.dash-section { display: none; }
+
+/* Оригинальная механика — класс active */
+.dash-section.active-section { display: block; }
+
+/* Падеж, когда JS ставит aria-hidden="false" вместо класса */
+.dash-section[aria-hidden="false"] { display: block; }
+
+/* если хочешь более явный приоритет (только при необходимости) — раскомментируй строку ниже */
+/* .dash-section.active-section,
+   .dash-section[aria-hidden="false"] { display: block !important; } */
+
+
+/* подсветка активной кнопки */
+.dash-nav .nav-btn.nav-active {
+    background: #dfeffc;
+    border-radius: 8px;
+    font-weight: 700;
+}
+
+/* ограничим высоту таблицы внутри секции, чтобы не было "растягивания" */
+.table-wrap { max-height: calc(80vh - 220px); overflow: auto; }
+
+/* мелкие улучшения (по желанию) */
+.dash-section:focus { outline: none; }
+
+#block-timer {
+    font-size: 24px;
+    font-weight: bold;
+    color: #523488;
+}
+
+/* картинка блока в правом нижнем углу */
+#block-image {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    max-width: 100%;
+    max-height: calc(100% - 240px); /* Adjusted to prevent overlap with tasks */
+    width: auto;
+    height: auto;
+    z-index: 1;
+    object-fit: contain;
+    object-position: bottom right;
+    pointer-events: none;
+}

@@ -1,0 +1,615 @@
+{# templates/dashboard_page.html #}
+{% extends "base.html" %}
+
+{% block title %}Таблица результатов — {{ tournament.name if tournament else "—" }}{% endblock %}
+
+{% block content %}
+<div class="dashboard-root">
+  <header style="display:flex;justify-content:space-between;align-items:center;">
+    <div>
+      <h2>Таблица результатов — {{ tournament.name if tournament else "Турнир" }}</h2>
+    </div>
+
+    <nav style="display:flex;align-items:center;gap:12px;">
+      <a href="{{ url_for('tasks.index') }}" class="nav-btn" style="background-color: #523488; color: #fff;">На главную</a>
+      <nav class="dash-nav" aria-label="Навигация по таблицам">
+        <a href="#overall" class="nav-btn" data-target="#overall">Общее</a>
+        {% for b in blocks %}
+          <a href="#block-{{ b.id }}" class="nav-btn" data-target="#block-{{ b.id }}">{{ b.name }}</a>
+        {% endfor %}
+      </nav>
+    </nav>
+  </header>
+
+  <style>
+    #message {
+      margin: 12px 0 0;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-weight: 600;
+      transition: opacity 0.3s ease;
+    }
+    #message.hidden {
+      display: none;
+    }
+    #message.visible {
+      display: block;
+    }
+    #message.visible.info {
+      background: rgba(80, 160, 255, 0.15);
+      color: #1d4ed8;
+      border: 1px solid rgba(80, 160, 255, 0.35);
+    }
+    #message.visible.error {
+      background: rgba(240, 68, 56, 0.12);
+      color: #b91c1c;
+      border: 1px solid rgba(240, 68, 56, 0.35);
+    }
+    .dash-nav .nav-btn.flash-highlight {
+      background: #facc15;
+      color: #2f2000;
+      box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.6);
+    }
+    .standings tr.flash-row {
+      background: rgba(250, 204, 21, 0.18);
+      transition: background 0.4s ease;
+    }
+  </style>
+
+  <main class="dashboard-sections" id="dashboard-sections" style="margin-top:12px;">
+    {# --- overall section --- #}
+    <section id="overall"
+         class="dash-section {% if not active_block_id %}active-section{% endif %}"
+         aria-hidden="{% if not active_block_id %}false{% else %}true{% endif %}"
+         tabindex="-1">
+      <h3 style="margin: 0;">Итог по блокам</h3>
+      <div class="table-wrap">
+        <table id="overall-table" class="standings">
+          <thead>
+            <tr>
+              <th>Место</th>
+              <th>Команда</th>
+              <th>Сумма</th>
+              {% for b in blocks %}<th>{{ b.name }}</th>{% endfor %}
+            </tr>
+          </thead>
+          <tbody><!-- JS заполнит --></tbody>
+        </table>
+      </div>
+    </section>
+
+    {# --- each block section --- #}
+    {% for bd in blocks_data %}
+      <section id="block-{{ bd.block.id }}"
+         class="dash-section {% if bd.block.id == active_block_id %}active-section{% endif %}"
+         aria-hidden="{% if bd.block.id == active_block_id %}false{% else %}true{% endif %}"
+         tabindex="-1">
+        <header style="display:flex;justify-content:space-between;align-items:center;">
+          <h3 style="margin:0;">Блок: {{ bd.block.name }}</h3>
+        </header>
+
+        <div class="table-wrap" style="margin-top:8px;">
+          <table id="block-table-{{ bd.block.id }}" class="standings">
+            <thead>
+              <tr>
+                <th>Место</th>
+                <th>Команда</th>
+                <th>Сумма</th>
+                {% for t in bd.tasks %}<th title="{{ t.title }}">#{{ loop.index }}</th>{% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in bd.rows %}
+                <tr>
+                  <td class="rank">{{ r.rank_label }}</td>
+                  <td class="team">
+                    {{ r.team.name }}
+                  </td>
+
+                  <td class="total">{{ r.total }}</td>
+                  {% for cell in r.cells %}
+                    {% if cell.state == "no-answer" %}
+                      <td class="cell no-answer"></td>
+                    {% elif cell.state == "correct" %}
+                      <td class="cell correct">{{ cell.points }}</td>
+                    {% elif cell.state == "partial" %}
+                      <td class="cell partial">{{ cell.points }}</td>
+                    {% else %}
+                      <td class="cell wrong">{{ cell.points if cell.points is not none else 0 }}</td>
+                    {% endif %}
+                  {% endfor %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endfor %}
+  </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  // данные из шаблона (безопасно сериализованные)
+  const TOURNAMENT_ID = {{ tournament.id | tojson }};
+  const blocks = {{ (blocks | map(attribute='id') | list) | tojson }};
+  const activeBlock = {{ active_block_id | tojson }};
+  const overallAPI = {{ overall_api | tojson }};
+
+  // time metadata
+  const serverTimeStr = {{ server_time | tojson }};
+  const blocksMeta = {{ blocks_meta | tojson }};
+  const tournamentEndIso = {{ tournament_end | tojson }};
+
+  const previousBlockSnapshots = new Map();
+  const notificationQueue = [];
+  const navHighlightTimers = new Map();
+  const rowHighlightTimers = new Map();
+  const pendingRowHighlights = new Map();
+  let notificationActive = false;
+
+  // --- helpers ---
+  function $(sel, root=document){ return root.querySelector(sel); }
+  function $all(sel, root=document){ return Array.from(root.querySelectorAll(sel)); }
+  function escapeHtml(s){ if (s == null) return ""; return String(s)
+    .replaceAll("&","&amp;").replaceAll("<","&lt;")
+    .replaceAll(">","&gt;").replaceAll('"',"&quot;"); }
+
+  function pad2(n){ return String(n).padStart(2,"0"); }
+  function formatMMSS(totalSeconds){
+    if (totalSeconds <= 0) return "00:00";
+    const s = Math.floor(totalSeconds);
+    const mm = Math.floor(s / 60);
+    const ss = s % 60;
+    return `${pad2(mm)}:${pad2(ss)}`;
+  }
+  function formatHMS(totalSeconds){
+    if (totalSeconds <= 0) return "00:00:00";
+    const s = Math.floor(totalSeconds);
+    const days = Math.floor(s / 86400);
+    const hours = Math.floor((s % 86400) / 3600);
+    const mins = Math.floor((s % 3600) / 60);
+    const secs = s % 60;
+    if (days > 0) return `${days}d ${pad2(hours)}:${pad2(mins)}:${pad2(secs)}`;
+    return `${pad2(hours)}:${pad2(mins)}:${pad2(secs)}`;
+  }
+
+  function el(id) { return document.getElementById(id); }
+
+  function showMessage(msg, type = "info") {
+    const div = el("message");
+    if (!div) return;
+    div.textContent = msg;
+    div.className = `visible ${type}`;
+  }
+
+  function hideMessage() {
+    const div = el("message");
+    if (!div) return;
+    div.className = "hidden";
+    div.textContent = "";
+  }
+
+  function highlightNavBlock(blockId) {
+    const selector = `.dash-nav .nav-btn[data-target="#block-${blockId}"]`;
+    let navBtn = document.querySelector(selector);
+    if (!navBtn) {
+      navBtn = document.querySelector(`.dash-nav .nav-btn[href="#block-${blockId}"]`);
+    }
+    if (!navBtn) return;
+    navBtn.classList.add("flash-highlight");
+    if (navHighlightTimers.has(blockId)) {
+      clearTimeout(navHighlightTimers.get(blockId));
+    }
+    const timer = setTimeout(() => {
+      navBtn.classList.remove("flash-highlight");
+      navHighlightTimers.delete(blockId);
+    }, 3200);
+    navHighlightTimers.set(blockId, timer);
+  }
+
+  function rememberRowHighlight(blockId, teamId) {
+    if (teamId == null) return;
+    const teamKey = String(teamId);
+    if (!pendingRowHighlights.has(blockId)) {
+      pendingRowHighlights.set(blockId, new Set());
+    }
+    pendingRowHighlights.get(blockId).add(teamKey);
+  }
+
+  function applyRowHighlights(blockId) {
+    const pending = pendingRowHighlights.get(blockId);
+    if (!pending || pending.size === 0) return;
+    pendingRowHighlights.delete(blockId);
+    for (const teamId of pending) {
+      flashTeamRow(blockId, teamId);
+    }
+  }
+
+  function flashTeamRow(blockId, teamId) {
+    const teamIdStr = String(teamId);
+    const tbody = document.querySelector(`#block-table-${blockId} tbody`);
+    if (!tbody) return;
+    const rowEl = tbody.querySelector(`tr[data-team-id="${teamIdStr}"]`);
+    if (!rowEl) return;
+    const timerKey = `${blockId}:${teamIdStr}`;
+    rowEl.classList.add("flash-row");
+    if (rowHighlightTimers.has(timerKey)) {
+      clearTimeout(rowHighlightTimers.get(timerKey));
+    }
+    const timer = setTimeout(() => {
+      rowEl.classList.remove("flash-row");
+      rowHighlightTimers.delete(timerKey);
+    }, 3200);
+    rowHighlightTimers.set(timerKey, timer);
+  }
+
+  function enqueueNotifications(items) {
+    if (!Array.isArray(items) || items.length === 0) return;
+    for (const item of items) {
+      notificationQueue.push(item);
+    }
+    processNotificationQueue();
+  }
+
+  function processNotificationQueue() {
+    if (notificationActive) return;
+    if (notificationQueue.length === 0) {
+      hideMessage();
+      return;
+    }
+    notificationActive = true;
+    const item = notificationQueue.shift();
+    showMessage(item.message, item.type || "info");
+    if (item.blockId) highlightNavBlock(item.blockId);
+    setTimeout(() => {
+      notificationActive = false;
+      hideMessage();
+      processNotificationQueue();
+    }, 3500);
+  }
+
+  function getTeamId(row) {
+    if (!row) return null;
+    if (row.team_id != null) return row.team_id;
+    if (row.team && row.team.id != null) return row.team.id;
+    if (row.team_obj && row.team_obj.id != null) return row.team_obj.id;
+    return null;
+  }
+
+  function extractTeamPlainName(row) {
+    if (!row) return "Команда";
+    if (row.team_name && typeof row.team_name === "string") return row.team_name;
+    if (row.team && typeof row.team === "object") {
+      if (row.team.name) return row.team.name;
+      if (row.team.login) return row.team.login;
+    }
+    if (row.login) return row.login;
+    if (row.name) return row.name;
+    if (row.team_id) return `Команда #${row.team_id}`;
+    return "Команда";
+  }
+
+  function cloneBlockSnapshot(data) {
+    try {
+      return JSON.parse(JSON.stringify(data));
+    } catch (err) {
+      console.warn("cloneBlockSnapshot failed", err);
+      return null;
+    }
+  }
+
+  function detectBlockNotifications(blockData) {
+    const results = [];
+    if (!blockData || !blockData.block || !Array.isArray(blockData.rows)) return results;
+    const blockId = blockData.block.id;
+    const blockName = blockData.block.name || `Блок ${blockId}`;
+    const prev = previousBlockSnapshots.get(blockId);
+
+    if (!prev || !Array.isArray(prev.rows)) {
+      const snapshot = cloneBlockSnapshot(blockData);
+      if (snapshot) previousBlockSnapshots.set(blockId, snapshot);
+      return results;
+    }
+
+    const prevRowMap = new Map();
+    for (const row of prev.rows) {
+      if (!row) continue;
+      const teamId = getTeamId(row);
+      if (teamId != null) prevRowMap.set(teamId, row);
+    }
+
+    for (const row of blockData.rows) {
+      if (!row) continue;
+      const teamId = getTeamId(row);
+      if (teamId == null) continue;
+      const prevRow = prevRowMap.get(teamId);
+      if (!prevRow) continue;
+      const cells = Array.isArray(row.cells) ? row.cells : [];
+      const prevCells = Array.isArray(prevRow.cells) ? prevRow.cells : [];
+      for (let i = 0; i < cells.length; i++) {
+        const cell = cells[i] || {};
+        const prevCell = prevCells[i] || {};
+        const prevState = prevCell.state || "no-answer";
+        const newState = cell.state || "no-answer";
+        const prevPoints = prevCell.points ?? null;
+        const newPoints = cell.points ?? null;
+
+        const stateChanged = prevState === "no-answer" && newState !== "no-answer";
+        const pointsIncreased = (prevPoints ?? 0) < (newPoints ?? 0);
+
+        if (stateChanged || pointsIncreased) {
+          const taskNumber = i + 1;
+          const teamName = extractTeamPlainName(row);
+          const pointsValue = newPoints == null ? 0 : Number(newPoints);
+          const message = `${teamName} сдали задачу #${taskNumber} из ${blockName} на ${pointsValue} баллов`;
+          results.push({ message, blockId, taskNumber, teamName, teamId, points: pointsValue });
+        }
+      }
+    }
+
+    const snapshot = cloneBlockSnapshot(blockData);
+    if (snapshot) previousBlockSnapshots.set(blockId, snapshot);
+    return results;
+  }
+
+  function handleBlockUpdates(blockData) {
+    const notifications = detectBlockNotifications(blockData);
+    if (!notifications.length) return;
+    for (const note of notifications) {
+      if (note.blockId != null && note.teamId != null) {
+        rememberRowHighlight(note.blockId, note.teamId);
+      }
+    }
+    enqueueNotifications(notifications);
+  }
+
+  // --- server-time sync for client-side timers ---
+  let serverOffset = 0;
+  if (serverTimeStr) {
+    const serverMs = Date.parse(serverTimeStr);
+    if (!Number.isNaN(serverMs)) serverOffset = Date.now() - serverMs;
+  }
+  function nowByServerMs(){ return Date.now() - serverOffset; }
+
+  function updateTimers(){
+    for (const bid of (blocks || [])) {
+      const meta = (blocksMeta && blocksMeta[bid]) ? blocksMeta[bid] : null;
+      const el = document.getElementById(`block-timer-${bid}`);
+      if (!el) continue;
+      if (!meta || !meta.end_iso || !meta.start_iso) {
+        el.textContent = "—";
+        continue;
+      }
+      const startMs = Date.parse(meta.start_iso);
+      const endMs = Date.parse(meta.end_iso);
+      const nowMs = nowByServerMs();
+
+      if (nowMs < startMs) {
+        el.textContent = "не начался";
+      } else if (nowMs >= endMs) {
+        el.textContent = "закончен";
+      } else {
+        const secLeft = Math.max(0, Math.ceil((endMs - nowMs) / 1000));
+        el.textContent = formatMMSS(secLeft);
+      }
+    }
+
+    const tel = document.getElementById("tournament-end-timer");
+    if (tel) {
+      if (!tournamentEndIso) {
+        tel.textContent = "—";
+      } else {
+        const endMs = Date.parse(tournamentEndIso);
+        const nowMs = nowByServerMs();
+        if (nowMs >= endMs) {
+          tel.textContent = "закончен";
+        } else {
+          const secLeft = Math.max(0, Math.ceil((endMs - nowMs) / 1000));
+          tel.textContent = formatHMS(secLeft);
+        }
+      }
+    }
+  }
+
+  // --- utility: normalize id like "#block-123" or "block-123" -> "#block-123" ---
+  function normId(id){
+    if (!id) return "";
+    id = String(id);
+    return id.startsWith("#") ? id : ("#" + id);
+  }
+
+  // --- show/hide sections (now robust) ---
+  function showSectionById(rawId){
+    const id = normId(rawId);
+    if (!id) return;
+
+    const sections = $all(".dash-section");
+    const navBtns = $all(".dash-nav .nav-btn");
+
+    // iterate sections and toggle
+    sections.forEach(sec => {
+      const sel = "#" + sec.id;
+      if (sel === id) {
+        sec.classList.add("active-section");
+        sec.setAttribute("aria-hidden", "false");
+        try { sec.focus({preventScroll:true}); } catch(e){}
+      } else {
+        sec.classList.remove("active-section");
+        sec.setAttribute("aria-hidden", "true");
+      }
+    });
+
+    // update nav visuals
+    navBtns.forEach(a => {
+      const target = a.dataset.target ? normId(a.dataset.target) : normId(a.getAttribute("href"));
+      if (target === id) a.classList.add("nav-active");
+      else a.classList.remove("nav-active");
+    });
+
+    // update url hash (use replaceState to avoid creating history entry on every click)
+    try {
+      if (location.hash !== id) history.replaceState(null, "", id);
+    } catch (e) {
+      // fallback: set location.hash
+      try { location.hash = id; } catch(e){}
+    }
+  }
+
+  // --- helpers to render API responses (unchanged behavior) ---
+  function formatTeamLabel(row) {
+    if (!row) return "—";
+    if (typeof row.team_name === "string" && row.team_name.trim() !== "") {
+      return escapeHtml(row.team_name);
+    }
+    const t = row.team || row.team_obj || null;
+    if (t) {
+      if (t.name) return escapeHtml(t.name);
+      if (t.login) return escapeHtml(t.login);
+      if (t.id) return escapeHtml("Team #" + String(t.id));
+    }
+    if (typeof row.team_name === "string" && row.team_name) return escapeHtml(row.team_name);
+    if (row.team_id) return escapeHtml("Team #" + String(row.team_id));
+    return "—";
+  }
+
+  function updateBlockTable(data){
+    try {
+      if (!data || !data.block || !Array.isArray(data.rows)) return;
+      const tbody = document.querySelector(`#block-table-${data.block.id} tbody`);
+      if(!tbody) return;
+      let html = "";
+      for(const r of (data.rows || [])){
+        const teamLabel = formatTeamLabel(r);
+        const total = (r.total == null) ? "" : escapeHtml(String(r.total));
+        const teamId = getTeamId(r);
+        const rowAttr = teamId != null ? ` data-team-id="${escapeHtml(String(teamId))}"` : "";
+        html += `<tr${rowAttr}>
+                   <td class="rank">${escapeHtml(String(r.rank_label ?? ""))}</td>
+                   <td class="team">${teamLabel}</td>
+                   <td class="total">${total}</td>`;
+        for(const c of (r.cells || [])){
+          if(!c || c.state === "no-answer") {
+            html += `<td class="cell no-answer"></td>`;
+          } else if(c.state === "correct") {
+            html += `<td class="cell correct">${c.points != null ? escapeHtml(String(c.points)) : ""}</td>`;
+          } else if(c.state === "partial") {
+            html += `<td class="cell partial">${c.points != null ? escapeHtml(String(c.points)) : ""}</td>`;
+          } else {
+            html += `<td class="cell wrong">${c.points != null ? escapeHtml(String(c.points)) : "0"}</td>`;
+          }
+        }
+        html += `</tr>`;
+      }
+      tbody.innerHTML = html;
+      applyRowHighlights(data.block.id);
+      console.debug("updateBlockTable: rendered block", data.block.id, "rows", (data.rows || []).length);
+    } catch (err) {
+      console.warn("updateBlockTable error:", err);
+    }
+  }
+
+  function updateOverallTable(data){
+    try {
+      if (!data || !Array.isArray(data.rows)) return;
+      const tbody = document.querySelector(`#overall-table tbody`);
+      if(!tbody) return;
+      let html = "";
+      for(const r of (data.rows || [])){
+        const teamLabel = formatTeamLabel(r);
+        const total = (r.total == null) ? "" : escapeHtml(String(r.total));
+        html += `<tr>
+                   <td class="rank">${escapeHtml(String(r.rank_label ?? ""))}</td>
+                   <td class="team">${teamLabel}</td>
+                   <td class="total">${total}</td>`;
+        for(const c of (r.cells || [])){
+          if(!c || !c.answered) {
+            html += `<td class="cell no-answer"></td>`;
+          } else {
+            const pts = c.points == null ? 0 : c.points;
+            if (pts === 0) {
+              html += `<td class="cell wrong">0</td>`;
+            } else {
+              html += `<td class="cell correct">${escapeHtml(String(pts))}</td>`;
+            }
+          }
+        }
+        html += `</tr>`;
+      }
+      tbody.innerHTML = html;
+      console.debug("updateOverallTable: rendered overall rows:", (data.rows || []).length);
+    } catch (err) {
+      console.warn("updateOverallTable error:", err);
+    }
+  }
+
+  // --- fetch helper (simple, same as старый рабочий код) ---
+  async function fetchJson(url){
+    const r = await fetch(url, { credentials: "same-origin" });
+    if(!r.ok) throw new Error("HTTP " + r.status + " " + url);
+    return r.json();
+  }
+
+  async function pollAll(){
+    try{
+      if (overallAPI) {
+        const overall = await fetchJson(overallAPI);
+        updateOverallTable(overall);
+      }
+    } catch(e){
+      console.warn("overall poll failed", e);
+    }
+
+    for(const id of (blocks || [])){
+      try{
+        const blk = await fetchJson(`/api/dashboard/block/${id}`);
+        handleBlockUpdates(blk);
+        updateBlockTable(blk);
+      }catch(e){
+        console.warn("block poll failed", id, e);
+      }
+    }
+  }
+
+  // ------------- init: attach handlers AFTER DOM is ready -------------
+  document.addEventListener("DOMContentLoaded", () => {
+    // wire nav buttons reliably (query inside DOMContentLoaded)
+    const navBtns = $all(".dash-nav .nav-btn");
+    navBtns.forEach(a => {
+      a.addEventListener("click", ev => {
+        ev.preventDefault();
+        // try data-target first, fallback to href
+        const rawTarget = a.dataset.target || a.getAttribute("href");
+        if (!rawTarget) return;
+        showSectionById(rawTarget);
+      });
+    });
+
+    // handle hashchange / back-forward
+    window.addEventListener("hashchange", () => {
+      const h = location.hash || "";
+      if (h && document.querySelector(h)) showSectionById(h);
+    });
+
+    // select initial section (hash -> activeBlock -> overall)
+    const hash = location.hash || "";
+    if (hash && document.querySelector(hash)) {
+      showSectionById(hash);
+    } else if (activeBlock) {
+      showSectionById(`#block-${activeBlock}`);
+    } else {
+      showSectionById("#overall");
+    }
+
+    // start timers and polling
+    updateTimers();
+    setInterval(updateTimers, 1000);
+    setTimeout(() => { pollAll().catch(e => console.warn("initial poll error", e)); }, 50);
+    setInterval(() => { pollAll().catch(e => console.warn("periodic poll error", e)); }, 5000);
+  });
+
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,435 @@
+{# templates/waiting.html #}
+{% extends "base.html" %}
+
+{% block title %}Ожидание — {{ tournament.name if tournament else "Турнир" }}{% endblock %}
+
+{% block content %}
+<div style="width:100%;position:relative;height:100%;display:flex;flex-direction:column;">
+    <div style="flex:1;">
+      <h2 style="margin-top:0;">
+        {% if next_block is defined and next_block %}
+          Блок завершен
+        {% else %}
+          Ожидание начала турнира
+        {% endif %}
+      </h2>
+
+      <p style="font-size:1.25rem;margin:8px 0;">
+        <strong id="tournament-name">{{ tournament.name if tournament else "—" }}</strong>
+      </p>
+
+      {% if next_block is defined and next_block %}
+        <p style="font-size:1.1rem;margin:12px 0;color:#666;">
+          Следующий блок: <strong>{{ next_block.name }}</strong>
+        </p>
+        <p style="color:#666;margin:12px 0;">
+          Блок завершен! Вы можете перейти к следующему блоку.
+        </p>
+      {% else %}
+        <p style="color:#666;margin:6px 0;">
+          <span id="start-label">Турнир стартует:</span>
+          <strong id="tournament-start-readable">
+            {% if tournament and tournament.start_at %}{{ tournament.start_at }}{% else %}—{% endif %}
+          </strong>
+        </p>
+
+        <div style="margin-top:18px;">
+          <p style="color:#777;margin-top:8px;" id="countdown-note">До старта осталось:</p>
+
+          <div style="font-size:2.8rem;font-weight:700;color:#222;">
+            <span id="countdown">--:--:--</span>
+          </div>
+
+          <p style="color:#666;margin-top:10px;" id="next-block-row" hidden>
+            Следующий блок: <strong id="next-block-name">—</strong>
+          </p>
+        </div>
+      {% endif %}
+    </div>
+
+    {% if next_block is defined and next_block %}
+      <div style="margin-top:auto;padding-top:20px;">
+        <button id="start-next-block-btn" class="task-send no-answer" style="width:100%;height:46px;border-radius:8px;">
+          Начать следующий блок
+        </button>
+
+      <script>
+        // Проверяем, есть ли у кнопки обработчик - если нет, добавляем
+        document.addEventListener('DOMContentLoaded', function() {
+          const btn = document.getElementById('start-next-block-btn');
+          if (btn && !btn.dataset.listenerAdded) {
+            btn.dataset.listenerAdded = 'true';
+            btn.addEventListener('click', async function() {
+              const nextBlockId = new URLSearchParams(window.location.search).get('next_block_id');
+              const tournamentId = new URLSearchParams(window.location.search).get('tournament_id');
+              
+              if (!nextBlockId || !tournamentId) {
+                window.location.href = `/tournament/${tournamentId}`;
+                return;
+              }
+              
+              try {
+                const res = await fetch("/start_block", {
+                  method: "POST",
+                  headers: {"Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest"},
+                  credentials: "same-origin",
+                  body: JSON.stringify({ block_id: parseInt(nextBlockId, 10) })
+                });
+                const json = await res.json().catch(() => ({}));
+                if (res.ok && json.ok) {
+                  // Блок начат, переходим на страницу турнира
+                  window.location.href = `/tournament/${tournamentId}`;
+                } else {
+                  alert("Ошибка при начале блока: " + (json.error || "Неизвестная ошибка"));
+                }
+              } catch (err) {
+                console.error("Ошибка при начале блока:", err);
+                alert("Ошибка при начале блока");
+              }
+            });
+          }
+        });
+      </script>
+      </div>
+    {% else %}
+      <footer style="position: absolute; bottom: 18px;">
+        <p style="margin-top:18px;color:#999;">Страница автоматически обновится при начале турнира/блока.</p>
+      </footer>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% set init_start = tournament.start_at if tournament and tournament.start_at else None %}
+{% set init_server_time = server_time if server_time else None %}
+{% set init_tournament_id = tournament.id if tournament and tournament.id else None %}
+<script>
+(function(){
+  // данные из шаблона (tojson безопасно сериализует)
+  const initialTournamentStartIso = {{ init_start | tojson }};
+  const serverTimeStr = {{ init_server_time | tojson }};
+  const tournamentId = {{ init_tournament_id | tojson }};
+
+  // небольшие утилиты
+  function pad(n){ return String(n).padStart(2,"0"); }
+  function sleep(ms){ return new Promise(res => setTimeout(res, ms)); }
+  function nowMs(){ return Date.now(); }
+
+  // синхронизация client <-> server (ms offset = clientNow - serverNow)
+  let offset = 0;
+  if (serverTimeStr) {
+    const serverMs = Date.parse(serverTimeStr);
+    if (!Number.isNaN(serverMs)) offset = Date.now() - serverMs;
+  }
+  function nowSyncedMs(){ return Date.now() - offset; }
+
+  // отображение читабельной даты
+  function setReadableStart(isoStr) {
+    const el = document.getElementById("tournament-start-readable");
+    if (!el) return;
+    if (!isoStr) { el.textContent = "—"; return; }
+    try {
+      const dt = new Date(isoStr);
+      el.textContent = dt.toLocaleString();
+    } catch(e) {
+      el.textContent = isoStr;
+    }
+  }
+
+  // форматирование счётчика
+  function fmtHMSFromMs(ms) {
+    if (ms <= 0) return "00:00:00";
+    const s = Math.floor(ms/1000);
+    const days = Math.floor(s / 86400);
+    const hours = Math.floor((s % 86400) / 3600);
+    const mins = Math.floor((s % 3600) / 60);
+    const secs = s % 60;
+    if (days > 0) return `${days}d ${pad(hours)}:${pad(mins)}:${pad(secs)}`;
+    return `${pad(hours)}:${pad(mins)}:${pad(secs)}`;
+  }
+
+  // безопасный fetch: пробуем две формы /api/tournament/<id> и /api/tournament?id=...
+  async function fetchTournamentStatus(id) {
+    if (!id) return null;
+    const tryUrls = [
+      `/api/tournament/${encodeURIComponent(id)}`,
+      `/api/tournament?id=${encodeURIComponent(id)}`
+    ];
+    for (const u of tryUrls) {
+      try {
+        const res = await fetch(u, { credentials: "same-origin" });
+        if (!res.ok) continue;
+        const json = await res.json().catch(()=>null);
+        if (json) return json;
+      } catch (err) {
+        // network error: попробуем другой URL / потом ретраим
+        continue;
+      }
+    }
+    return null;
+  }
+
+  // редиректы
+  function gotoTournament(id) {
+    if (!id) { location.href = "/"; return; }
+    location.href = `/tournament/${encodeURIComponent(id)}`;
+  }
+  function gotoDashboard(id) {
+    if (!id) { location.href = "/dashboard"; return; }
+    location.href = `/dashboard/${encodeURIComponent(id)}`;
+  }
+
+  // targetStartMs — millisecond timestamp (по synced clock) до которого считаем
+  // targetLabel — строка что это за событие ("турнир" или "блок")
+  // nextBlockName — имя блока (если применимо)
+  let targetStartMs = null;
+  let targetLabel = "tournament"; // "tournament" или "block"
+  let nextBlockName = null;
+
+  // установить новый целевой таймер (переключает UI)
+  function setTarget(startIsoOrMs, label, blockName) {
+    if (!startIsoOrMs) {
+      targetStartMs = null;
+      targetLabel = null;
+      nextBlockName = null;
+      // reset UI
+      document.getElementById("next-block-row").hidden = true;
+      setReadableStart(null);
+      return;
+    }
+
+    // startIsoOrMs может быть ISO или ms number
+    let ms;
+    if (typeof startIsoOrMs === "number") ms = startIsoOrMs;
+    else ms = Date.parse(startIsoOrMs);
+
+    // convert to synced clock target: server times are absolute, but we compare using nowSyncedMs
+    targetStartMs = ms;
+    targetLabel = label || "tournament";
+    nextBlockName = blockName || null;
+
+    // update UI textual parts
+    if (label === "block") {
+      const row = document.getElementById("next-block-row");
+      const nameEl = document.getElementById("next-block-name");
+      if (row) row.hidden = false;
+      if (nameEl) nameEl.textContent = blockName || "—";
+      // show human-readable start as well (reuse tournament-start-readable element)
+      setReadableStart(new Date(ms).toISOString());
+      document.getElementById("start-label").textContent = "Следующий блок стартует:";
+      document.getElementById("countdown-note").textContent = "До старта блока:";
+    } else {
+      // tournament-level
+      document.getElementById("next-block-row").hidden = true;
+      setReadableStart(new Date(ms).toISOString());
+      document.getElementById("start-label").textContent = "Турнир стартует:";
+      document.getElementById("countdown-note").textContent = "До старта осталось:";
+    }
+  }
+
+  // immediate check: когда пользователь открыл waiting, проверим текущее состояние
+  // и при необходимости переключим целевой таймер на следующий блок.
+  async function immediateCheckAndMaybeSwitch() {
+    // if we have no tournament id — nothing to poll
+    if (!tournamentId) {
+      // if there is an explicit tournament start provided in template — use it
+      if (initialTournamentStartIso) {
+        // use server-synced milliseconds for target
+        setTarget(initialTournamentStartIso, "tournament", null);
+      } else {
+        // nothing to do
+        setTarget(null);
+      }
+      return;
+    }
+
+    // first: try to get server-side tournament JSON
+    const json = await fetchTournamentStatus(tournamentId);
+    if (!json) {
+      // fallback to the template-provided tournament.start_at
+      if (initialTournamentStartIso) setTarget(initialTournamentStartIso, "tournament", null);
+      return;
+    }
+
+    const state = (json.state || "").toString().toLowerCase();
+
+    // finished -> dashboard
+    if (state === "finished") {
+      gotoDashboard(tournamentId);
+      return;
+    }
+
+    // if server already reports active_block -> go to tournament page
+    if (state === "running" && json.active_block && (json.active_block.id || json.active_block)) {
+      //gotoTournament(tournamentId);
+      return;
+    }
+
+    // Otherwise: if tournament hasn't started yet (server start_at in future) — show tournament start
+    let tourStartIso = json.start_at || initialTournamentStartIso || null;
+    if (tourStartIso) {
+      const tourStartMs = Date.parse(tourStartIso);
+      if (nowSyncedMs() < tourStartMs) {
+        // not started yet — keep counting to tournament start
+        setTarget(tourStartIso, "tournament", null);
+        return;
+      }
+    }
+
+    // Здесь: турнир уже стартовал, но сервер не сообщает активный блок.
+    const blocks = Array.isArray(json.blocks) ? json.blocks : [];
+    if (blocks.length === 0) {
+      setTarget(null);
+      return;
+    }
+
+    const nextPending = blocks.find(b => !b.started_at);
+    if (nextPending) {
+      const name = nextPending.name || nextPending.title || `#${nextPending.id ?? "?"}`;
+      let appliedCountdown = false;
+      if (nextPending.start_offset != null && json.started_at) {
+        const baseMs = Date.parse(json.started_at);
+        if (!Number.isNaN(baseMs)) {
+          const targetMs = baseMs + Number(nextPending.start_offset) * 1000;
+          if (!Number.isNaN(targetMs) && targetMs > nowSyncedMs()) {
+            setTarget(new Date(targetMs).toISOString(), "block", name);
+            appliedCountdown = true;
+          }
+        }
+      }
+
+      if (!appliedCountdown) {
+        setTarget(null);
+        const row = document.getElementById("next-block-row");
+        const nameEl = document.getElementById("next-block-name");
+        if (row) row.hidden = false;
+        if (nameEl) nameEl.textContent = name;
+        const startLabel = document.getElementById("start-label");
+        const note = document.getElementById("countdown-note");
+        if (startLabel) startLabel.textContent = "Следующий блок ожидает запуска:";
+        if (note) note.textContent = "Ожидайте начала блока.";
+      }
+      return;
+    }
+
+    const unfinished = blocks.find(b => b.started_at && !b.finished_at);
+    if (unfinished) {
+      setTarget(null);
+      return;
+    }
+
+    // все блоки завершены
+    gotoDashboard(tournamentId);
+  }
+
+  // polling loop that runs when timer reaches zero — waits until server reports active_block or finished
+  let pollActive = false;
+  async function waitServerAndRedirect() {
+    if (pollActive) return;
+    pollActive = true;
+    if (!tournamentId) {
+      location.href = "/";
+      return;
+    }
+
+    const retryIntervalMs = 1000;
+    while (true) {
+      try {
+        const json = await fetchTournamentStatus(tournamentId);
+        if (json) {
+          const state = (json.state || "").toString().toLowerCase();
+          if (state === "finished") {
+            gotoDashboard(tournamentId);
+            return;
+          }
+          if (state === "running" && json.active_block && (json.active_block.id || json.active_block)) {
+            //gotoTournament(tournamentId);
+            return;
+          }
+          // if still running but no active_block: maybe next block still in future; keep waiting
+          // but also, if server now has a future block earlier than previous target, update it:
+          // re-run immediateCheckAndMaybeSwitch to refresh next-block target
+          await immediateCheckAndMaybeSwitch();
+        }
+      } catch (err) {
+        console.warn("waiting: poll error", err);
+      }
+      await sleep(retryIntervalMs);
+    }
+  }
+
+  // main UI updater: ticks every second; when reaches zero triggers waitServerAndRedirect
+  function updateTick() {
+    const el = document.getElementById("countdown");
+    if (!el) return;
+    if (!targetStartMs) {
+      el.textContent = "--:--:--";
+      return;
+    }
+    const remMs = Math.max(0, targetStartMs - nowSyncedMs());
+    el.textContent = fmtHMSFromMs(remMs);
+    if (remMs <= 0) {
+      // if timer reaches zero, start server polling to confirm actual state and redirect
+      waitServerAndRedirect().catch(e => console.error("waiting: redirect failed", e));
+    }
+  }
+
+  // Кнопка "Начать следующий блок"
+  const startNextBlockBtn = document.getElementById("start-next-block-btn");
+  if (startNextBlockBtn) {
+    const nextBlockId = new URLSearchParams(window.location.search).get("next_block_id");
+    const tournamentId = new URLSearchParams(window.location.search).get("tournament_id");
+    if (nextBlockId && tournamentId) {
+      startNextBlockBtn.addEventListener("click", async () => {
+        // Отправляем запрос на сервер для установки времени начала блока
+        try {
+          const res = await fetch("/start_block", {
+            method: "POST",
+            headers: {"Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest"},
+            credentials: "same-origin",
+            body: JSON.stringify({ block_id: parseInt(nextBlockId, 10) })
+          });
+          const json = await res.json().catch(() => ({}));
+          if (res.ok && json.ok) {
+            // Блок начат, переходим на страницу турнира
+            window.location.href = `/tournament/${tournamentId}`;
+          } else {
+            alert("Ошибка при начале блока: " + (json.error || "Неизвестная ошибка"));
+          }
+        } catch (err) {
+          console.error("Ошибка при начале блока:", err);
+          alert("Ошибка при начале блока");
+        }
+      });
+    }
+  }
+
+  // initialise: set initial UI target and start intervals (только если нет кнопки "Начать следующий блок")
+  if (!startNextBlockBtn) {
+    console.log("ПИПИПИ!");
+    (async function init() {
+      // initial readable tournament start from template if provided
+      if (initialTournamentStartIso) {
+        // if initial start in future, use it as initial target; but immediateCheck will override if tournament already started.
+        const initialMs = Date.parse(initialTournamentStartIso);
+        if (!Number.isNaN(initialMs)) {
+          setTarget(initialTournamentStartIso, "tournament", null);
+        }
+      }
+
+      // perform server check to possibly switch to next block timer or redirect
+      try {
+        await immediateCheckAndMaybeSwitch();
+      } catch (e) {
+        console.warn("waiting: immediateCheck failed", e);
+      }
+
+      // start ticking locally (client-side only — does not assume server-side changes)
+      updateTick();
+      setInterval(updateTick, 1000);
+    })();
+  }
+
+})();
+</script>
+{% endblock %}

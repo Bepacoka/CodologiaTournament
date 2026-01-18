@@ -1,0 +1,75 @@
+{# templates/index.html #}
+{% extends "base.html" %}
+
+{% block title %}Главная — Codologia{% endblock %}
+
+{% block content %}
+<div style="width: 100%;">
+  <header>
+    <div>
+      <h1 style="margin:0;">Codologia</h1>
+    </div>
+  </header>
+
+  <section style="margin-top:18px;">
+    <h3>Доступные турниры</h3>
+
+    {# прокручиваемый контейнер турниров #}
+    <div class="tournaments-list" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;max-height:60vh;overflow:auto;padding-right:6px;">
+      {% for t in tournaments %}
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:8px;background:#fafafa;">
+          <div>
+            <strong>{{ t.name }}</strong>
+            <div style="font-size:0.9rem;color:#666;">
+              Турнир доступен для регистрации
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <a href="{{ url_for('auth.login') }}" class="task-send no-answer" style="height:38px;line-height:38px;padding:0 12px;text-decoration:none;">Вход</a>
+            <a href="{{ url_for('dashboard.index', tournament_id=t.id) }}" class="task-send" style="height:38px;line-height:38px;padding:0 12px;text-decoration:none;background:#523488;">Результаты</a>
+          </div>
+        </div>
+      {% else %}
+        <div style="padding:12px;color:#666;">Турниров ещё нет.</div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(async function(){
+  const listContainer = document.querySelector('.tournaments-list');
+  if(!listContainer) return;
+
+  async function fetchAndRender() {
+    try{
+      const r = await fetch('/api/tournaments', {credentials: 'same-origin'});
+      if(!r.ok) return;
+      const json = await r.json();
+      const rows = json.tournaments || [];
+      // собираем HTML и заменяем контейнер содержимым (без изменения остальной верстки)
+      const html = rows.map(t => {
+        const regBtn = `<a href="/auth/login" class="task-send no-answer" style="height:38px;line-height:38px;padding:0 12px;text-decoration:none;">Вход</a>`;
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:8px;background:#fafafa;">
+          <div><strong>${escapeHtml(t.name)}</strong><div style="font-size:0.9rem;color:#666;">Турнир доступен для регистрации</div></div>
+          <div style="display:flex;gap:8px;">${regBtn}<a href="/dashboard/${t.id}" class="task-send" style="height:38px;line-height:38px;padding:0 12px;text-decoration:none;background:#523488;">Результаты</a></div>
+        </div>`;
+      }).join('\n');
+      listContainer.innerHTML = html || '<div style="padding:12px;color:#666;">Турниров ещё нет.</div>';
+    }catch(e){
+      console.warn('failed to update tournaments list', e);
+    }
+  }
+
+  // initial render: optional — you might already have server-rendered content; fetch to refresh
+  await fetchAndRender();
+  // poll every 15s
+  setInterval(fetchAndRender, 15000);
+
+  // helper
+  function escapeHtml(s){ if (s==null) return ""; return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'); }
+})();
+</script>
+{% endblock %}

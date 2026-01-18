@@ -1,0 +1,59 @@
+{# templates/register.html #}
+{% extends "base.html" %}
+
+{% block title %}Регистрация команды — {{ tournament.name if tournament else "Codologia" }}{% endblock %}
+
+{% block content %}
+<div style="max-width:760px;margin:24px auto;padding:18px;border-radius:12px;background:#fff;">
+  <h2 style="margin-top:0;">Регистрация команды</h2>
+  <p>Выберите турнир из списка и напишите название команды.</p>
+
+  <form method="post" action="{{ url_for('auth.register') }}" id="register-form">
+    <input type="hidden" name="tournament_id"
+           value="{{ request.args.get('tournament_id') or (tournament.id if tournament is defined and tournament else '') }}">
+
+    <label style="display:block;margin-top:10px;font-weight:600;">Название команды</label>
+    <input name="team_name" required class="task-input" placeholder="Название команды">
+
+    <label style="display:block;margin-top:12px;font-weight:600;">Выбрать турнир</label>
+    <select id="tournament-select" name="tournament_id" class="task-input" style="height:44px;padding-left:12px;">
+      {% for t in tournaments %}
+        <option value="{{ t.id }}"
+          {% if tournament is defined and tournament and t.id == tournament.id %}selected{% endif %}>
+          {{ t.name }}
+        </option>
+      {% endfor %}
+    </select>
+
+    <div style="margin-top:14px;">
+      <button id="register-submit" type="submit" class="task-send no-answer" style="height:46px;">Зарегистрироваться</button>
+    </div>
+  </form>
+
+  {% if error %}
+    <div style="margin-top:12px;color:#e33;">{{ error }}</div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  const sel = document.getElementById("tournament-select");
+  const submit = document.getElementById("register-submit");
+
+  function updateSubmitState(){
+    if (!sel) return;
+    submit.disabled = false;
+    submit.classList.remove('disabled');
+    submit.textContent = "Зарегистрироваться";
+  }
+
+  if (sel) {
+    sel.addEventListener('change', updateSubmitState);
+    // initial
+    updateSubmitState();
+  }
+})();
+</script>
+{% endblock %}

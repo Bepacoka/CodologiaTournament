@@ -1,0 +1,33 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:15
+    container_name: codologia-db
+    environment:
+      POSTGRES_USER: codologia
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: codologia
+    volumes:
+      - codologia_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  web:
+    image: codologia:latest
+    container_name: codologia-web
+    depends_on:
+      - db
+    environment:
+      FLASK_APP: wsgi.py
+      FLASK_ENV: development
+      DATABASE_URL: postgresql://codologia:secret@db:5432/codologia
+    ports:
+      - "8000:5000"
+    command: flask run --host=0.0.0.0
+    volumes:
+      - ./app:/app  # если хочешь менять код на лету
+    restart: unless-stopped
+
+volumes:
+  codologia_data:

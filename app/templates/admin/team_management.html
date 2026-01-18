@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Управление командами</h2>
+    
+    <div class="card mt-4">
+        <div class="card-header">
+            <h4>Добавить команду</h4>
+        </div>
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('admin.manage_teams') }}">
+                <div class="mb-3">
+                    <label for="tournament_id" class="form-label">Турнир</label>
+                    <select class="form-select" id="tournament_id" name="tournament_id" required>
+                        <option value="" selected disabled>Выберите турнир</option>
+                        {% for tournament in tournaments %}
+                        <option value="{{ tournament.id }}">{{ tournament.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="name" class="form-label">Название команды</label>
+                    <input type="text" autocomplete="off" class="form-control" id="name" name="name" required>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="password" class="form-label">Пароль</label>
+                    <input type="text" autocomplete="off" class="form-control" id="password" name="password" required>
+                </div>
+                
+                <h5 class="mt-4">Участники (минимум 1)</h5>
+                
+                <div class="mb-3">
+                    <label for="member1" class="form-label">Участник 1</label>
+                    <input type="text" autocomplete="off" class="form-control" id="member1" name="member1" required>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="member2" class="form-label">Участник 2 (необязательно)</label>
+                    <input type="text" autocomplete="off" class="form-control" id="member2" name="member2">
+                </div>
+                
+                <div class="mb-3">
+                    <label for="member3" class="form-label">Участник 3 (необязательно)</label>
+                    <input type="text" autocomplete="off" class="form-control" id="member3" name="member3">
+                </div>
+                
+                <input type="hidden" autocomplete="off" name="key" value="{{ request.args.get('key', '') }}">
+                <button type="submit" class="btn btn-primary">Добавить команду</button>
+            </form>
+        </div>
+    </div>
+    
+    {% if message %}
+    <div class="alert alert-{{ message_type }} mt-3">
+        {{ message }}
+    </div>
+    {% endif %}
+    
+    <div class="mt-4">
+        <h4>Существующие команды</h4>
+        <div class="list-group">
+            {% for team in teams %}
+            <div class="list-group-item">
+                <div class="d-flex w-100 justify-content-between">
+                    <h5 class="mb-1">{{ team.name }}</h5>
+                    <small>Турнир: {{ team.tournament.name }}</small>
+                </div>
+                <p class="mb-1">
+                    Состав: {{ team.member1 }}{% if team.member2 %}, {{ team.member2 }}{% endif %}{% if team.member3 %}, {{ team.member3 }}{% endif %}
+                </p>
+                <small>ID: {{ team.id }}</small>
+            </div>
+            {% else %}
+            <div class="alert alert-info">Нет зарегистрированных команд</div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}

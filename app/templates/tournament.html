@@ -1,0 +1,1203 @@
+{% extends "base.html" %}
+
+{% block title %}Турнир — {{ tournament.name if tournament is defined else "Codologia" }}{% endblock %}
+
+{% block content %}
+{% set is_review = review_mode|default(False) %}
+<div class="tournament-root">
+  <header class="tournament-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+    <div>
+      <h2 id="tournament-name">{{ tournament.name if tournament is defined else "" }}</h2>
+      <div id="block-meta">
+        {% if is_review %}
+          {% if active_block is defined and active_block %}
+            <strong id="block-name">{{ active_block.name }}</strong>
+          {% else %}
+            <strong id="block-name">Турнир завершён</strong>
+          {% endif %}
+          <span id="block-status"> — Просмотр</span>
+        {% elif active_block is defined and active_block %}
+          <strong id="block-name">{{ active_block.name }}</strong>
+          <span id="block-status"> — Активен</span>
+        {% else %}
+          <strong id="block-name">Турнир завершён</strong>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="tournament-header__actions" style="display:flex;align-items:center;gap:12px;text-align:right;">
+      <span id="block-timer">Осталось: --:--</span>
+      <button id="next-block-btn" class="next-block-btn" type="button" style="display:none;">
+        <span class="next-block-btn__label">Следующий блок</span>
+        <span class="next-block-btn__icon" aria-hidden="true">→</span>
+      </button>
+    </div>
+  </header>
+  
+  <style>
+    .tournament-raw {
+      display: flex;
+      gap: 20px;
+      align-items: stretch;
+      min-height: 0;
+      height: calc(100vh - 220px);
+    }
+    .task-panel {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .task-content {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .task-main {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .task-main .task-image {
+      max-width: 100%;
+      height: auto;
+      border-radius: 12px;
+      object-fit: contain;
+    }
+    .next-block-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 999px;
+      background: #4a67f5;
+      border: none;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s ease;
+      text-decoration: none;
+    }
+    .next-block-btn:hover,
+    .next-block-btn:focus-visible {
+      background: #364ed1;
+    }
+    .task-answer {
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .examples-container {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .examples-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 30px;
+      align-items: flex-start;
+    }
+    .example-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 30px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      flex: 0 0 auto;
+      min-width: 20vw;
+    }
+    .example-text {
+      white-space: normal;
+    }
+    .example-input {
+      min-width: 30px;
+      max-width: 100%;
+      flex: 1;
+      text-align: center;
+    }
+    .example-mark {
+      font-weight: 700;
+      font-size: 1.05rem;
+    }
+    .example-mark.correct {
+      color: #197a1b;
+    }
+    .example-mark.wrong {
+      color: #c71d3a;
+    }
+    .task-placeholder {
+      color: #666;
+    }
+    .tasks-container {
+      flex: 0 0 28%;
+      max-width: 300px;
+      min-width: 220px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-height: 0;
+    }
+    .tasks-nav {
+      flex: 0 1 auto;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      overflow-y: auto;
+      min-height: 0;
+      padding: 12px 4px 0;
+    }
+    .tasks-nav .task-button {
+      flex: 0 0 auto;
+    }
+    .block-image {
+      position: absolute;
+      bottom: 0;
+      right: 0;
+      max-width: 100%;
+      max-height: calc(100% - var(--tasks-height));
+      width: auto;
+      height: auto;
+      z-index: 1;
+      object-fit: contain;
+      object-position: bottom right;
+      pointer-events: none;
+    }
+    @media (max-width: 960px) {
+      .tournament-raw {
+        flex-direction: column;
+        height: auto;
+        min-height: 0;
+      }
+      .task-content {
+        padding: 20px;
+      }
+      .task-answer {
+        padding: 16px 20px 20px;
+      }
+      .tasks-container {
+        flex: 0 0 auto;
+        max-width: none;
+        width: 100%;
+        min-width: 0;
+      }
+      .tasks-nav {
+        padding: 12px 0 0;
+        max-height: none;
+      }
+      .block-image {
+        margin-top: 16px;
+        align-self: center;
+      }
+    }
+  </style>
+
+  <div class="tournament-raw">
+    <section class="task-panel task" id="task-panel">
+      {% if initial_task is defined and initial_task %}
+        <div class="task-content">
+          <div class="task-main">
+            <h1 class="task-title">Задача №{{ initial_task.id }} — {{ initial_task.title or "" }}</h1>
+            <p class="task-text">{{ initial_task.text }}</p> 
+            {% if initial_task.image_url %}
+              <img class="task-image" src="{{ url_for('static', filename=initial_task.image_url) }}">
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="task-answer">
+          <form method="POST" action="{{ url_for('tasks.task', task_id=initial_task.id) }}" id="answer-form-fallback">
+            <input class="task-input" name="answer" autocomplete="off" placeholder="Введите ответ..." />
+            <button class="task-send no-answer" type="submit">Отправить</button>
+          </form>
+        </div>
+      {% else %}
+        <div class="task-content">
+          <p class="task-placeholder">Выберите задачу слева — содержимое загрузится автоматически.</p>
+        </div>
+      {% endif %}
+    </section>
+
+    <aside class="tasks-container">
+      <nav class="tasks-nav" id="tasks-nav" aria-label="Список задач">
+        {% if active_block is defined and active_block and active_block.tasks %}
+          {% for t in active_block.tasks %}
+            <a href="#" class="task-button {% if t.status == 'right' %}task-right{% elif t.status == 'wrong' %}task-wrong{% endif %}"
+               data-task-id="{{ t.id }}">{{ loop.index }}</a>
+          {% endfor %}
+        {% else %}
+          <div style="padding:12px;color:#666;">Задачи будут доступны, когда начнётся блок.</div>
+        {% endif %}
+      </nav>
+      <!-- Картинка блока в правом нижнем углу -->
+      <img id="block-image" class="block-image" style="display:none;" alt="Block image">
+    </aside>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const API_TOURN = "/api/tournament/{{ tid }}";
+const API_BLOCK = (id) => `/api/block/${id}`;
+const API_TASK = (id) => `/api/task/${id}`;
+
+let serverOffset = 0;
+let currentTournament = null;
+let currentBlock = null;
+let currentTasks = [];
+let currentTaskId = null;
+let timerInterval = null;
+let blockCheckInterval = null;
+let reviewMode = false;
+let currentBlockIndex = -1;
+let currentBlockId = null;
+let currentBlockOrder = null;
+
+async function handleTimerExpiry() {
+  try {
+    const tour = await fetchJSON(API_TOURN);
+    const ab = tour.active_block;
+    if (!ab) {
+      checkEndOfBlock();
+      return;
+    }
+    const block = await fetchJSON(API_BLOCK(ab.id));
+    const tasks = block.tasks || [];
+    const initialTaskId = currentTaskId;
+    for (const t of tasks) {
+      const targetId = t.id;
+      if (String(currentTaskId) !== String(targetId)) {
+        await loadTask(targetId, tour);
+      }
+      await autoSubmitCurrentTask();
+    }
+    if (initialTaskId && String(currentTaskId) !== String(initialTaskId)) {
+      await loadTask(initialTaskId, tour);
+    }
+  } catch (err) {
+    console.error("handleTimerExpiry", err);
+  } finally {
+    checkEndOfBlock();
+  }
+}
+
+async function autoSubmitCurrentTask() {
+  if (!currentTaskId) return;
+  const taskAnswer = document.querySelector(".task-answer");
+  if (!taskAnswer) return;
+
+  const type = taskAnswer.getAttribute("data-task-type");
+  if (type === "single") {
+    const input = taskAnswer.querySelector("input.task-input");
+    const submitBtn = taskAnswer.querySelector("button.task-send");
+    if (!input || !submitBtn || submitBtn.disabled) return;
+    submitBtn.disabled = true;
+    input.disabled = true;
+    const payload = { answer: input.value || "" };
+    try {
+      await fetch(API_TASK(currentTaskId), {
+        method: "POST",
+        headers: {"Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest"},
+        credentials: "same-origin",
+        body: JSON.stringify(payload)
+      });
+    } catch (err) {
+      console.error("autoSubmit single", err);
+      input.disabled = false;
+      submitBtn.disabled = false;
+      showMessage("Не удалось автоматически отправить ответ", "error");
+    }
+  } else if (type === "examples") {
+    const submitBtn = taskAnswer.querySelector("button.task-send");
+    if (!submitBtn || submitBtn.disabled) return;
+    const inputs = Array.from(document.querySelectorAll("input.example-input"));
+    submitBtn.disabled = true;
+    inputs.forEach(inp => (inp.disabled = true));
+    const answersArr = inputs
+      .filter(inp => inp.dataset.exampleId)
+      .map(inp => ({ example_id: parseInt(inp.dataset.exampleId, 10), answer: inp.value || "" }));
+    try {
+      await fetch(API_TASK(currentTaskId), {
+        method: "POST",
+        headers: {"Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest"},
+        credentials: "same-origin",
+        body: JSON.stringify({ answers: answersArr })
+      });
+    } catch (err) {
+      console.error("autoSubmit examples", err);
+      inputs.forEach(inp => (inp.disabled = false));
+      submitBtn.disabled = false;
+      showMessage("Не удалось автоматически отправить примеры", "error");
+    }
+  }
+}
+
+function showMessage(msg, type="info") {
+    const div = document.getElementById("message");
+    if (!div) {
+        console.warn("showMessage fallback:", msg);
+        return;
+    }
+    div.textContent = msg;
+    // type: "info" для успешных сообщений (зеленый), "error" для ошибок (красный)
+    div.className = "visible " + type;
+    setTimeout(() => div.className = "hidden", 4000);
+}
+
+// Функция для поиска первой нерешенной задачи
+function findFirstUnansweredTask() {
+    const nav = el("tasks-nav");
+    if (!nav) return null;
+    const buttons = nav.querySelectorAll(".task-button");
+    for (const btn of buttons) {
+        // Проверяем, есть ли класс task-right или task-wrong - если нет, задача не решена
+        if (!btn.classList.contains("task-right") && !btn.classList.contains("task-wrong")) {
+            const taskId = btn.dataset.taskId;
+            if (taskId) {
+                return currentTasks.find(t => String(t.id) === String(taskId));
+            }
+        }
+    }
+    return null;
+}
+
+// Функция для поиска следующей нерешенной задачи, начиная с текущей позиции
+function findNextUnansweredTask(currentTaskId) {
+    const nav = el("tasks-nav");
+    if (!nav) return null;
+    const buttons = Array.from(nav.querySelectorAll(".task-button"));
+    const currentIndex = buttons.findIndex(btn => String(btn.dataset.taskId) === String(currentTaskId));
+    
+    // Ищем следующую нерешенную задачу, начиная со следующей после текущей
+    for (let i = currentIndex + 1; i < buttons.length; i++) {
+        const btn = buttons[i];
+        if (!btn.classList.contains("task-right") && !btn.classList.contains("task-wrong") && !btn.classList.contains("task-partial")) {
+            const taskId = btn.dataset.taskId;
+            if (taskId) {
+                return currentTasks.find(t => String(t.id) === String(taskId));
+            }
+        }
+    }
+    
+    // Если не нашли дальше, возвращаемся к началу и ищем первую нерешенную
+    return findFirstUnansweredTask();
+}
+
+function fmtSeconds(n) {
+  if (n < 0) n = 0;
+  const m = Math.floor(n / 60);
+  const s = Math.floor(n % 60);
+  return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+}
+
+async function fetchJSON(url, opts) {
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(`HTTP ${r.status} ${url}`);
+  return r.json();
+}
+
+function syncedNow(serverTimeStr) {
+  const serverMs = Date.parse(serverTimeStr);
+  serverOffset = Date.now() - serverMs;
+  return new Date(serverMs);
+}
+function nowByServer() { return new Date(Date.now() - serverOffset); }
+function el(id) { return document.getElementById(id); }
+
+function findBlockIndexById(blockId) {
+  if (!currentTournament || !Array.isArray(currentTournament.blocks)) return -1;
+  return currentTournament.blocks.findIndex(b => String(b.id) === String(blockId));
+}
+
+function updateNextBlockButton() {
+  const headerBtn = el("next-block-btn");
+  const timerEl = el("block-timer");
+  if (!headerBtn) return;
+
+  if (!reviewMode || !currentTournament || !Array.isArray(currentTournament.blocks) || currentTournament.blocks.length === 0) {
+    headerBtn.style.display = "none";
+    if (timerEl) timerEl.style.display = "inline";
+    return;
+  }
+
+  if (timerEl) timerEl.style.display = "none";
+
+  const blocks = currentTournament.blocks;
+  const isLast = currentBlockIndex >= blocks.length - 1;
+  headerBtn.style.display = "inline-flex";
+  headerBtn.querySelector(".next-block-btn__label").textContent = isLast ? "Таблица результатов" : "Следующий блок";
+}
+
+async function goToNextBlock() {
+  if (!reviewMode || !currentTournament) return;
+  const blocks = currentTournament.blocks || [];
+  if (!blocks.length) return;
+
+  if (currentBlockIndex < 0) {
+    currentBlockIndex = findBlockIndexById(currentBlockId);
+  }
+
+  if (currentBlockIndex < blocks.length - 1) {
+    currentBlockIndex += 1;
+    const nextBlock = blocks[currentBlockIndex];
+    await loadBlock(nextBlock.id, currentTournament);
+    updateNextBlockButton();
+  } else {
+    window.location.href = `/dashboard/${currentTournament.id}`;
+  }
+}
+
+function setTimer(secondsLeft) {
+  clearInterval(timerInterval);
+  const timerEl = el("block-timer");
+  if (!timerEl) return;
+  timerEl.textContent = "Осталось: " + fmtSeconds(secondsLeft);
+  let remaining = Math.max(0, Math.floor(secondsLeft));
+  timerInterval = setInterval(() => {
+    remaining--;
+    if (timerEl) timerEl.textContent = "Осталось: " + fmtSeconds(remaining);
+    if (remaining <= 0) {
+      clearInterval(timerInterval);
+      handleTimerExpiry();
+    }
+  }, 1000);
+  
+  // Добавляем периодическую проверку завершения блока (каждые 5 секунд)
+  clearInterval(blockCheckInterval);
+  blockCheckInterval = setInterval(async () => {
+    if (currentBlock && currentTournament) {
+      try {
+        const tour = await fetchJSON(API_TOURN);
+        const ab = tour.active_block;
+        if (ab && ab.id && ab.id !== currentBlock.id) {
+          // Активный блок изменился - переключаемся
+          await loadBlock(ab.id, tour);
+          currentTournament = tour;
+        }
+      } catch (e) {
+        console.error("Ошибка проверки активного блока:", e);
+      }
+    }
+  }, 5000);
+}
+
+async function init() {
+  // Убеждаемся, что элемент #message находится в .main для правильного позиционирования
+  const messageEl = document.getElementById("message");
+  const mainEl = document.querySelector(".main");
+  if (messageEl && mainEl && !mainEl.contains(messageEl)) {
+    mainEl.insertBefore(messageEl, mainEl.firstChild);
+  }
+  
+  try {
+    const tour = await fetchJSON(API_TOURN);
+    currentTournament = tour;
+
+    if (tour.name) el("tournament-name").textContent = tour.name;
+
+    const activeBlockId = (tour.active_block && (tour.active_block.id || tour.active_block)) ? (tour.active_block.id || tour.active_block) : null;
+    reviewMode = !activeBlockId;
+    if (reviewMode) {
+      const blocks = tour.blocks || [];
+      if (blocks.length > 0) {
+        currentBlockIndex = 0;
+        await loadBlock(blocks[0].id, tour);
+      } else {
+        el("task-panel").innerHTML = "<div style='padding:12px;color:#666;'>Задач не найдено.</div>";
+      }
+
+      const message = document.getElementById("message");
+      message.textContent = "Все блоки турнира завершены. Вы можете просмотреть свои ответы.";
+      message.className = "visible info";
+      setTimeout(() => message.className = "hidden", 4000);
+
+      updateNextBlockButton();
+      return;
+    }
+
+    // Обновляем картинку блока из active_block, если есть
+    if (tour.active_block && tour.active_block.image_url) {
+      const blockImageEl = el("block-image");
+      blockImageEl.src = `/static/images/${tour.active_block.image_url}`;
+      blockImageEl.style.display = "block";
+    }
+
+    await loadBlock(activeBlockId, tour);
+  } catch (err) {
+    console.error("Ошибка при инициализации турнира:", err);
+    el("block-name").textContent = "Ошибка загрузки данных";
+    el("block-timer").textContent = "Осталось: --:--";
+  }
+}
+
+async function checkEndOfBlock() {
+  try {
+    const submitBtn = document.querySelector('.task-answer button.task-send');
+    if (submitBtn && !submitBtn.disabled) {
+      submitBtn.click();
+    }
+    const tour = await fetchJSON(API_TOURN);
+    const ab = tour.active_block;
+    if (!ab) {
+      const blocks = Array.isArray(tour.blocks) ? tour.blocks : [];
+      let nextBlock = null;
+      if (currentBlockOrder !== null) {
+        nextBlock = blocks.find(b => Number(b.order) === Number(currentBlockOrder) + 1);
+      }
+      if (!nextBlock) {
+        nextBlock = blocks.find(b => !b.started_at);
+      }
+      if (nextBlock) {
+        window.location.href = `/waiting?tournament_id=${tour.id}&next_block_id=${nextBlock.id}`;
+      } else {
+        window.location.href = `/dashboard/${tour.id}`;
+      }
+      return;
+    }
+    const newBlockId = ab.id || ab;
+    if (newBlockId !== currentBlock.id) {
+      await loadBlock(newBlockId, tour);
+      return;
+    }
+    if (!reviewMode && ab.time_left && ab.time_left > 0) { setTimer(ab.time_left); return; }
+    window.location.reload();
+  } catch (e) {
+    console.error("Ошибка проверки конца блока:", e);
+    setTimeout(checkEndOfBlock, 3000);
+  }
+}
+
+async function loadBlock(blockId, tournamentData) {
+  try {
+    const block = await fetchJSON(API_BLOCK(blockId));
+    currentBlock = block;
+    currentBlockId = block.id;
+    currentBlockOrder = block.order;
+    currentBlockIndex = findBlockIndexById(block.id);
+    el("block-name").textContent = block.name || ("Блок " + blockId);
+    
+    // Обновляем картинку блока в правом нижнем углу
+    const blockImageEl = el("block-image");
+    if (block.image_url) {
+      blockImageEl.src = `/static/images/${block.image_url}`;
+      blockImageEl.style.display = "block";
+    } else {
+      blockImageEl.style.display = "none";
+    }
+
+    // Используем time_left из ответа API
+    let secondsLeft = null;
+    if (block.time_left !== null && block.time_left !== undefined) {
+      secondsLeft = Math.floor(block.time_left);
+    } else if (tournamentData && tournamentData.server_time) {
+      syncedNow(tournamentData.server_time);
+    }
+    
+    if (secondsLeft === null || secondsLeft < 0) secondsLeft = 0;
+    if (!reviewMode) {
+      setTimer(secondsLeft);
+    } else {
+      const timerEl = el("block-timer");
+      if (timerEl) timerEl.style.display = "none";
+    }
+
+    currentTasks = block.tasks || [];
+    renderTasksNav(currentTasks);
+    updateNextBlockButton();
+
+    const firstId = (currentTasks.length ? currentTasks[0].id : null);
+    if (firstId) {
+      loadTask(firstId);
+      history.replaceState({taskId:firstId}, "", `/tournament/${tournamentData.id}#task-${firstId}`);
+    } else {
+      el("task-panel").innerHTML = "<div style='padding:12px;color:#666;'>Задач пока нет.</div>";
+    }
+  } catch (e) {
+    console.error("Ошибка загрузки блока:", e);
+    el("block-name").textContent = "Ошибка загрузки блока";
+  }
+}
+
+function updateActiveTask(taskId) {
+  const nav = el("tasks-nav");
+  if (!nav) return;
+  const buttons = nav.querySelectorAll(".task-button");
+  buttons.forEach(btn => {
+    if (String(btn.dataset.taskId) === String(taskId)) {
+      btn.classList.add("task-active");
+    } else {
+      btn.classList.remove("task-active");
+    }
+  });
+}
+
+async function renderTasksNav(tasks) {
+  const nav = el("tasks-nav");
+  if (!nav) return;
+  nav.innerHTML = "";
+  if (!currentTournament) {
+    currentTournament = await fetchJSON(API_TOURN);
+  }
+
+  for (let i = 0; i < tasks.length; i++) {
+    const t = tasks[i];
+    const a = document.createElement("a");
+    a.href = "#";
+    a.className = "task-button status-none";
+    if (t.status === "right") a.classList.add("task-right");
+    if (t.status === "wrong") a.classList.add("task-wrong");
+    if (t.status === "partial") a.classList.add("task-partial");
+    a.dataset.taskId = t.id;
+    a.textContent = i + 1;
+    a.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      const id = a.dataset.taskId;
+      history.pushState({taskId:id}, "", `/tournament/${currentTournament.id}#task-${id}`);
+      loadTask(id);
+    });
+    nav.appendChild(a);
+  }
+
+  if (reviewMode) {
+    const nextBtn = document.createElement("a");
+    nextBtn.href = "#";
+    nextBtn.className = "task-button task-next-block";
+    nextBtn.title = "Следующий блок";
+    nextBtn.innerHTML = "<span aria-hidden=\"true\">→</span>";
+    nextBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      goToNextBlock();
+    });
+    nav.appendChild(nextBtn);
+  }
+
+  if (currentTaskId) {
+    updateActiveTask(currentTaskId);
+  }
+}
+
+async function loadTask(taskId) {
+  currentTaskId = String(taskId);
+  updateActiveTask(taskId);
+  const panel = el("task-panel");
+  panel.innerHTML = `<div style="padding:12px;color:#666;">Загрузка задачи...</div>`;
+
+  try {
+    let data = null;
+    try {
+      data = await fetchJSON(API_TASK(taskId));
+    } catch (e) {
+      // fallback по списку задач (если есть)
+      const found = currentTasks.find(t => String(t.id) === String(taskId));
+      if (found) {
+        data = {
+          id: found.id,
+          title: found.title,
+          text: found.text || "",
+          image_url: found.image_url || found.image || null,
+          points: found.points ?? 1,
+          existing_answer: found.existing_answer || null,
+          examples: found.examples || []
+        };
+      } else {
+        throw e;
+      }
+    }
+
+    // --- build DOM deterministically (no innerHTML blobs) ---
+    panel.innerHTML = ""; // очистим
+
+    // container: task-content (scrollable) and task-answer (fixed bottom)
+    const taskContent = document.createElement("div");
+    taskContent.className = "task-content";
+
+    const taskMain = document.createElement("div");
+    taskMain.className = "task-main";
+    const h1 = document.createElement("h1");
+    h1.className = "task-title";
+    h1.textContent = data.title || `Задача #${data.id}`;
+    const p = document.createElement("p");
+    p.className = "task-text";
+    p.textContent = data.text || "";
+    taskMain.appendChild(h1);
+    taskMain.appendChild(p);
+    if (data.image_url) {
+      const img = document.createElement("img");
+      img.className = "task-image";
+      img.src = `/static/images/` + data.image_url;
+      taskMain.appendChild(img);
+    }
+    taskContent.appendChild(taskMain);
+
+    const examples = Array.isArray(data.examples) ? data.examples : [];
+    const hasExamples = examples.length > 0;
+    // We'll create a form for examples (if any)
+    let examplesForm = null;
+    let examplesContainer = null;
+    if (hasExamples) {
+      examplesContainer = document.createElement("div");
+      examplesContainer.className = "examples-container";
+      examplesForm = document.createElement("form");
+      examplesForm.id = "examples-form";
+
+      const list = document.createElement("div");
+      list.className = "examples-list";
+
+      for (const ex of examples) {
+        const row = document.createElement("div");
+        row.className = "example-row";
+
+        const span = document.createElement("span");
+        span.className = "example-text";
+        span.textContent = ex.text || "";
+
+        const input = document.createElement("input");
+        input.className = "example-input";
+        input.setAttribute("data-example-id", ex.id);
+
+        let mark = null;
+        if (ex.existing_answer) {
+          input.value = ex.existing_answer.answer_text || "";
+          input.disabled = true;
+
+          mark = document.createElement("span");
+          mark.className = "example-mark " + (ex.existing_answer.is_correct ? "correct" : "wrong");
+          mark.textContent = ex.existing_answer.is_correct ? "✓" : "✕";
+        } else {
+          input.placeholder = "Ответ…";
+        }
+
+        row.appendChild(span);
+        row.appendChild(input);
+        if (mark) row.appendChild(mark);
+        list.appendChild(row);
+      }
+
+      examplesForm.appendChild(list);
+      examplesContainer.appendChild(examplesForm);
+      taskContent.appendChild(examplesContainer);
+    }
+
+    // task-answer (sibling) — сюда ставим либо single-input+button, либо кнопку/badge для examples
+    const taskAnswer = document.createElement("div");
+    taskAnswer.className = "task-answer";
+    taskAnswer.setAttribute("data-task-type", (hasExamples ? "examples" : (data.existing_answer ? "view" : "single")));
+
+    // --- prepare controls ---
+    if (hasExamples) {
+      // Ensure allAnswered is initialized correctly
+      const allAnswered = examples.every(ex => !!ex.existing_answer);
+      const anyAnswered = examples.some(ex => !!ex.existing_answer);
+      const allCorrect = allAnswered && examples.every(ex => ex.existing_answer.is_correct === true);
+
+      // Create a single button placed in task-answer (physically at bottom)
+      const submitBtn = document.createElement("button");
+      submitBtn.type = "button"; // НЕ form submit, мы будем собирать form вручную
+      submitBtn.className = "task-send no-answer";
+      submitBtn.textContent = allAnswered ? (allCorrect ? "Правильный ответ" : "Неправильный ответ") : "Отправить ответы";
+
+      if (allAnswered) {
+        submitBtn.disabled = true;
+        submitBtn.classList.remove("no-answer");
+        submitBtn.classList.add(allCorrect ? "answer-right" : "answer-wrong");
+      } else if (anyAnswered) {
+        // блокируем, если есть хоть один сохранённый (по твоему требованию)
+        submitBtn.disabled = true;
+      }
+
+      taskAnswer.appendChild(submitBtn);
+
+      // attach handler only if there is something to submit
+      submitBtn.addEventListener("click", async () => {
+        // collect only non-disabled inputs
+        const inputs = Array.from(examplesForm.querySelectorAll('input[data-example-id]'));
+        const answersArr = [];
+        for (const input of inputs) {
+          if (input.disabled) continue;
+          const v = (input.value || "");
+          answersArr.push({ example_id: parseInt(input.dataset.exampleId, 10), answer: v });
+        }
+        if (answersArr.length === 0) {
+          showMessage("Нет новых ответов для отправки", "error");
+          return;
+        }
+
+        // optimistic lock UI
+        inputs.forEach(i => i.disabled = true);
+        submitBtn.disabled = true;
+
+        try {
+          const res = await fetch(API_TASK(data.id), {
+            method: "POST",
+            headers: {"Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest"},
+            credentials: "same-origin",
+            body: JSON.stringify({ answers: answersArr })
+          });
+          const json = await res.json().catch(() => ({}));
+          if (res.ok && json.ok) {
+            // --- заменяем конструкцию summary на сохранение текста примера ---
+            const results = Array.isArray(json.results) ? json.results : [];
+            const allCorrectNow = results.length > 0 && results.every(r => r.is_correct === true);
+            const allWrongNow = results.length > 0 && results.every(r => !r.is_correct);
+            const partialNow = !allCorrectNow && !allWrongNow && results.length > 0;
+
+            // update nav button
+            const navBtn = document.querySelector(`[data-task-id="${data.id}"]`);
+            if (navBtn) {
+              navBtn.classList.remove("status-none");
+              if (allCorrectNow) {
+                navBtn.classList.add("task-right");
+              } else if (allWrongNow) {
+                navBtn.classList.add("task-wrong");
+              } else if (partialNow) {
+                navBtn.classList.add("task-partial");
+              } else {
+                navBtn.classList.add("task-wrong");
+              }
+            }
+
+            // соберём данные по строкам, но используя исходный массив `examples` для текста
+            const inputsArr = Array.from(examplesForm.querySelectorAll('input[data-example-id]'));
+            const rows = inputsArr.map(inp => {
+              const exId = parseInt(inp.dataset.exampleId, 10);
+              const val = inp.value;
+              const exObj = (Array.isArray(examples) && examples.find(e => Number(e.id) === exId)) || {};
+              const text = exObj.text || "";
+              const resObj = results.find(r => Number(r.example_id) === exId) || {};
+              const correct = !!resObj.is_correct;
+              return { id: exId, text, val, correct };
+            });
+
+            // удалим форму
+            examplesForm.remove();
+
+            if (!examplesContainer) {
+              examplesContainer = document.createElement("div");
+              examplesContainer.className = "examples-container";
+              taskContent.appendChild(examplesContainer);
+            }
+
+            // построим DOM summary и вставим в examplesContainer (оставляем текст + disabled input)
+            const summary = document.createElement("div");
+            summary.className = "examples-list";
+            for (const r of rows) {
+              const row = document.createElement("div");
+              row.className = "example-row";
+
+              const span = document.createElement("span");
+              span.className = "example-text";
+              span.textContent = r.text;
+
+              const inputEl = document.createElement("input");
+              inputEl.className = "example-input";
+              inputEl.value = r.val;
+              inputEl.disabled = true;
+
+              const mark = document.createElement("span");
+              mark.className = "example-mark " + (r.correct ? "correct" : "wrong");
+              mark.textContent = r.correct ? "✓" : "✕";
+
+              row.appendChild(span);
+              row.appendChild(inputEl);
+              row.appendChild(mark);
+
+              summary.appendChild(row);
+            }
+            examplesContainer.appendChild(summary);
+
+            // внизу рендерим единую badge-кнопку (Правильный/Частично верно/Неправильный ответ)
+            taskAnswer.innerHTML = "";
+            const badgeWrap = document.createElement("div");
+            badgeWrap.style.marginTop = "8px";
+            const badge = document.createElement("button");
+            let badgeClass, badgeText;
+            if (allCorrectNow) {
+              badgeClass = "answer-right";
+              badgeText = "Правильный ответ";
+            } else if (partialNow) {
+              badgeClass = "answer-partial";
+              badgeText = "Частично верно";
+            } else {
+              badgeClass = "answer-wrong";
+              badgeText = "Неправильный ответ";
+            }
+            badge.className = "task-send " + badgeClass;
+            badge.disabled = true;
+            badge.textContent = badgeText;
+            badgeWrap.appendChild(badge);
+            taskAnswer.appendChild(badgeWrap);
+
+            // Проверяем, завершен ли блок
+            if (json.block_completed) {
+              console.log("Блок завершен, next_block:", json.next_block);
+              if (json.next_block) {
+                // Есть следующий блок
+                showMessage(`Блок завершен! Переход к следующему блоку: ${json.next_block.name}`, "success");
+                setTimeout(async () => {
+                  window.location.href = `/waiting?tournament_id=${currentTournament.id}&next_block_id=${json.next_block.id}`;
+                }, 1500);
+              } else {
+                // Последний блок завершен - показываем результат и потом переходим на dashboard
+                console.log("Последний блок завершен, переход на dashboard");
+                showMessage("Все блоки завершены! Переход к таблице результатов", "success");
+                setTimeout(() => {
+                  if (currentTournament && currentTournament.id) {
+                    window.location.href = `/dashboard/${currentTournament.id}`;
+                  } else {
+                    console.error("currentTournament.id не найден:", currentTournament);
+                  }
+                }, 3000); // Увеличиваем время до 3 секунд, чтобы пользователь увидел результат
+              }
+            } else {
+              // Блок не завершен - переход к следующей нерешенной задаче через 1 секунду
+              setTimeout(() => {
+                const nextUnanswered = findNextUnansweredTask(data.id);
+                if (nextUnanswered && currentTournament) {
+                  loadTask(nextUnanswered.id);
+                  history.pushState({taskId: nextUnanswered.id}, "", `/tournament/${currentTournament.id}#task-${nextUnanswered.id}`);
+                }
+              }, 1000);
+            }
+          } else {
+            showMessage(json.error || "Ошибка отправки", "error");
+            inputs.forEach(i => i.disabled = false);
+            submitBtn.disabled = false;
+          }
+        } catch (err) {
+          console.error(err);
+          showMessage("Сетевая ошибка");
+          const inputs = Array.from(examplesForm.querySelectorAll('input[data-example-id]'));
+          inputs.forEach(i => i.disabled = false);
+          submitBtn.disabled = false;
+        }
+      });
+
+      // Обработчик Enter для отправки ответов на примеры
+      examplesForm.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !submitBtn.disabled) {
+          e.preventDefault();
+          submitBtn.click();
+        }
+      });
+
+    } else if (data.existing_answer) {
+      // single answered view
+      const input = document.createElement("input");
+      input.className = "task-input";
+      input.value = data.existing_answer.answer_text || "";
+      input.disabled = true;
+      taskAnswer.appendChild(input);
+
+      const wrap = document.createElement("div");
+      wrap.style.marginTop = "8px";
+      const badge = document.createElement("button");
+      badge.className = "task-send " + (data.existing_answer.is_correct ? "answer-right" : "answer-wrong");
+      badge.disabled = true;
+      badge.textContent = data.existing_answer.is_correct ? "Правильный ответ" : "Неправильный ответ";
+      wrap.appendChild(badge);
+      taskAnswer.appendChild(wrap);
+
+      // update nav button as well
+      const navBtn = document.querySelector(`[data-task-id="${data.id}"]`);
+      if (navBtn) {
+        navBtn.classList.remove("status-none");
+        navBtn.classList.add(data.existing_answer.is_correct ? "task-right" : "task-wrong");
+      }
+
+    } else {
+      // single unanswered: input in bottom area + submit button
+      const form = document.createElement("form");
+      form.id = "answer-form";
+      const input = document.createElement("input");
+      input.className = "task-input";
+      input.name = "answer";
+      input.placeholder = "Введите ответ…";
+      form.appendChild(input);
+      taskAnswer.appendChild(form);
+
+      const wrap = document.createElement("div");
+      wrap.style.marginTop = "8px";
+      const submitBtn = document.createElement("button");
+      submitBtn.type = "button";
+      submitBtn.className = "task-send no-answer";
+      submitBtn.textContent = "Отправить";
+      wrap.appendChild(submitBtn);
+      taskAnswer.appendChild(wrap);
+
+      // Предотвращаем стандартное поведение формы при нажатии Enter
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        if (!submitBtn.disabled) {
+          submitBtn.click();
+        }
+      });
+
+      // Обработчик Enter для отправки ответа
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !submitBtn.disabled) {
+          e.preventDefault();
+          submitBtn.click();
+        }
+      });
+
+      submitBtn.addEventListener("click", async () => {
+        const ans = (input.value || "").trim();
+        if (!ans) return;
+        input.disabled = true;
+        submitBtn.disabled = true;
+        try {
+          const res = await fetch(API_TASK(data.id), {
+            method: "POST",
+            headers: {"Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest"},
+            credentials: "same-origin",
+            body: JSON.stringify({ answer: ans })
+          });
+          const json = await res.json().catch(() => ({}));
+          if (res.ok && json.ok) {
+            const isLastBlockCompleted = json.block_completed && !json.next_block;
+            
+            const is_correct = !!json.is_correct;
+            const answerText = (json.answer_text !== undefined ? json.answer_text : ans);
+            const navBtn = document.querySelector(`[data-task-id="${data.id}"]`);
+            if (navBtn) {
+              navBtn.classList.remove("status-none");
+              navBtn.classList.add(is_correct ? "task-right" : "task-wrong");
+            }
+            taskAnswer.innerHTML = "";
+            const inp = document.createElement("input");
+            inp.className = "task-input";
+            inp.value = answerText;
+            inp.disabled = true;
+            taskAnswer.appendChild(inp);
+            const wrap2 = document.createElement("div");
+            wrap2.style.marginTop = "8px";
+            const badge = document.createElement("button");
+            badge.className = "task-send " + (is_correct ? "answer-right" : "answer-wrong");
+            badge.disabled = true;
+            badge.textContent = is_correct ? "Правильный ответ" : "Неправильный ответ";
+            wrap2.appendChild(badge);
+            taskAnswer.appendChild(wrap2);
+
+            // Проверяем, завершен ли блок
+            if (json.block_completed) {
+              console.log("Блок завершен, next_block:", json.next_block);
+              if (json.next_block) {
+                // Есть следующий блок
+                showMessage(`Блок завершен! Переход к следующему блоку: ${json.next_block.name}`, "success");
+                setTimeout(async () => {
+                  window.location.href = `/waiting?tournament_id=${currentTournament.id}&next_block_id=${json.next_block.id}`;
+                }, 1500);
+              } else {
+                // Последний блок завершен - показываем результат и потом переходим на dashboard
+                console.log("Последний блок завершен, переход на dashboard");
+                showMessage("Все блоки завершены! Переход к таблице результатов", "success");
+                setTimeout(() => {
+                  if (currentTournament && currentTournament.id) {
+                    window.location.href = `/dashboard/${currentTournament.id}`;
+                  } else {
+                    console.error("currentTournament.id не найден:", currentTournament);
+                  }
+                }, 3000); // Увеличиваем время до 3 секунд, чтобы пользователь увидел результат
+              }
+            } else {
+              // Блок не завершен - переход к следующей нерешенной задаче через 1 секунду
+              setTimeout(() => {
+                const nextUnanswered = findNextUnansweredTask(data.id);
+                if (nextUnanswered && currentTournament) {
+                  loadTask(nextUnanswered.id);
+                  history.pushState({taskId: nextUnanswered.id}, "", `/tournament/${currentTournament.id}#task-${nextUnanswered.id}`);
+                }
+              }, 1000);
+            }
+          } else {
+            showMessage(json.error || "Ошибка отправки", "error");
+            input.disabled = false;
+            submitBtn.disabled = false;
+          }
+        } catch (err) {
+          console.error(err);
+          showMessage("Сетевая ошибка", "error");
+          input.disabled = false;
+          submitBtn.disabled = false;
+        }
+      });
+    }
+
+    // append constructed nodes
+    panel.appendChild(taskContent);
+    panel.appendChild(taskAnswer);
+
+    // message node создается в HTML шаблоне в начале tournament-root
+
+  } catch (err) {
+    console.error("Ошибка загрузки задачи:", err);
+    panel.innerHTML = `<div style="padding:12px;color:#e33;">Не удалось загрузить задачу.</div>`;
+  }
+}
+
+async function submitCurrentBlockAnswers() {
+  const tasks = currentTasks || [];
+  for (const task of tasks) {
+    const taskId = task.id;
+    const taskAnswer = document.querySelector(`.task-answer[data-task-id='${taskId}']`);
+    if (!taskAnswer) continue;
+
+    const type = taskAnswer.getAttribute("data-task-type");
+    if (type === "single") {
+      const input = taskAnswer.querySelector("input.task-input");
+      if (!input || input.disabled) continue;
+      const payload = { answer: input.value || "" };
+      await fetch(API_TASK(taskId), {
+        method: "POST",
+        headers: {"Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest"},
+        credentials: "same-origin",
+        body: JSON.stringify(payload)
+      }).catch(err => console.error("submit single", err));
+    } else if (type === "examples") {
+      const inputs = Array.from(taskAnswer.querySelectorAll("input.example-input"));
+      const answersArr = inputs.map(inp => ({ example_id: parseInt(inp.dataset.exampleId, 10), answer: inp.value || "" }));
+      await fetch(API_TASK(taskId), {
+        method: "POST",
+        headers: {"Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest"},
+        credentials: "same-origin",
+        body: JSON.stringify({ answers: answersArr })
+      }).catch(err => console.error("submit examples", err));
+    }
+  }
+}
+
+function inputsToArray(nodeList) { return Array.prototype.slice.call(nodeList); }
+
+function escapeHtml(s) {
+  if (!s && s !== 0) return "";
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+window.addEventListener("popstate", (ev) => {
+  if (ev.state && ev.state.taskId) loadTask(ev.state.taskId);
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+  const headerBtn = el("next-block-btn");
+  if (headerBtn) {
+    headerBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      goToNextBlock();
+    });
+  }
+  init();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,28 @@
+{# templates/login.html #}
+{% extends "base.html" %}
+
+{% block title %}Вход — Codologia{% endblock %}
+
+{% block content %}
+<div style="max-width:760px;margin:24px auto;padding:18px;border-radius:12px;background:#fff;">
+  <h2 style="margin-top:0;">Вход в систему</h2>
+  <p>Введите название вашей команды для входа.</p>
+
+  <form method="post" action="{{ url_for('auth.login') }}" id="login-form">
+    <label style="display:block;margin-top:10px;font-weight:600;">Название команды</label>
+    <input name="team_name" required class="task-input" placeholder="Название команды" autocomplete="off" autofocus>
+
+    <label style="display:block;margin-top:12px;font-weight:600;">Пароль</label>
+    <input name="password" type="password" required class="task-input" autocomplete="off" placeholder="Пароль">
+
+    <div style="margin-top:14px;">
+      <button id="login-submit" type="submit" class="task-send no-answer" style="height:46px;">Войти</button>
+    </div>
+  </form>
+
+  {% if error %}
+    <div style="margin-top:12px;color:#e33;">{{ error }}</div>
+  {% endif %}
+</div>
+{% endblock %}
+
